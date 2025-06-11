@@ -122,11 +122,6 @@ class ExerciseDatabase:
             ],
         }
 
-        # Set baseline levels based on user's current ability
-        self.exercises["pushups"][7].max_reps_achieved = 15  # Single arm
-        self.exercises["squats"][1].max_reps_achieved = 20  # Air squats
-        self.exercises["pullups"][3].max_reps_achieved = 10  # Pull-ups
-
 
 class WorkoutSnacksApp:
     def __init__(self):
@@ -348,13 +343,23 @@ class WorkoutSnacksApp:
         # Create a more visible icon for Hyprland
         image = Image.new("RGBA", (64, 64), color=(0, 0, 0, 0))
         draw = ImageDraw.Draw(image)
-        
+
         # Draw a filled circle with border
         if warning_mode:
-            draw.ellipse([8, 8, 56, 56], fill=(255, 100, 100, 255), outline=(200, 0, 0, 255), width=3)
+            draw.ellipse(
+                [8, 8, 56, 56],
+                fill=(255, 100, 100, 255),
+                outline=(200, 0, 0, 255),
+                width=3,
+            )
         else:
-            draw.ellipse([8, 8, 56, 56], fill=(100, 255, 100, 255), outline=(0, 200, 0, 255), width=3)
-        
+            draw.ellipse(
+                [8, 8, 56, 56],
+                fill=(100, 255, 100, 255),
+                outline=(0, 200, 0, 255),
+                width=3,
+            )
+
         # Add "W" for workout
         draw.text((22, 18), "W", fill=(0, 0, 0, 255), anchor="mm")
 
@@ -664,14 +669,17 @@ class WorkoutSnacksApp:
     def run(self):
         """Run the application"""
         print("🏋️  Workout Snacks Started! 🏋️")
-        
+
         # Check if running on Hyprland and provide guidance
         import os
-        if os.environ.get('HYPRLAND_INSTANCE_SIGNATURE'):
-            print("Detected Hyprland! Make sure you have a system tray widget installed:")
+
+        if os.environ.get("HYPRLAND_INSTANCE_SIGNATURE"):
+            print(
+                "Detected Hyprland! Make sure you have a system tray widget installed:"
+            )
             print("- For Waybar: add 'tray' to modules")
             print("- For other bars: check their tray configuration")
-        
+
         print("Check your system tray for the workout icon.")
         print("Press Ctrl+C to quit.")
         print()
