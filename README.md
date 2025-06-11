@@ -61,11 +61,4 @@ Then add the custom module from `waybar-workout-config.json` to your waybar conf
 - **Notification Scheduling**: APScheduler manages 90-minute intervals with 30-minute warnings
 - **Multi-Interface Design**: Separate modules for GUI, CLI, and system integration
 
-## Baseline Configuration
-
-Pre-configured for intermediate fitness level:
-- 15 single-arm pushups (wide stance)
-- 20 air squats
-- 10 pull-ups
-
 The system automatically adapts difficulty based on your performance, ensuring continuous progression without manual adjustment.
