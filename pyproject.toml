@@ -1,0 +1,13 @@
+[project]
+name = "workout-snacks"
+version = "0.1.0"
+description = "Workout notification app with progressive exercise tracking"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "plyer>=2.1.0",
+    "pystray>=0.19.5",
+    "pillow>=10.0.0",
+    "apscheduler>=3.10.4",
+    "matplotlib>=3.7.0"
+]
