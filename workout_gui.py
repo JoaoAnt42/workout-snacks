@@ -1,32 +1,39 @@
 #!/usr/bin/env python3
 """
-Workout Snacks GUI - Desktop GUI application with built-in timer
+Workout Snacks GUI - Modern dark-themed desktop GUI application
 """
 
+import os
 import sqlite3
-import threading
-import time
-import tkinter as tk
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
-from tkinter import messagebox, ttk
 from typing import List, Tuple
+from collections import Counter, defaultdict
 
+# Kivy imports
+from kivy.app import App
+from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.gridlayout import GridLayout
+from kivy.uix.label import Label
+from kivy.uix.button import Button
+from kivy.uix.popup import Popup
+from kivy.uix.scrollview import ScrollView
+from kivy.clock import Clock
+from kivy.metrics import dp
+from kivy.graphics import Color, Rectangle
+from kivy.uix.widget import Widget
+from kivy.uix.floatlayout import FloatLayout
+
+# Chart imports
 try:
-    from collections import Counter, defaultdict
-
+    from kivy.garden.matplotlib.backend_kivyagg import FigureCanvasKivyAgg
     import matplotlib.pyplot as plt
-    from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-    from plyer import notification
-except ImportError as e:
-    print(f"Missing dependency: {e}")
-    print("Run: uv pip install plyer matplotlib")
-    if "tkinter" in str(e):
-        print(
-            "Also install tkinter: sudo pacman -S tk (Arch) or sudo apt install python3-tk (Ubuntu)"
-        )
-    exit(1)
+    MATPLOTLIB_AVAILABLE = True
+except ImportError:
+    MATPLOTLIB_AVAILABLE = False
+
+from plyer import notification
 
 
 @dataclass
@@ -56,9 +63,7 @@ class ExerciseDatabase:
                 Exercise("Pike Push-ups", 6, description="Inverted V position"),
                 Exercise("Archer Push-ups", 7, description="One-sided push-ups"),
                 Exercise("Single Arm Push-ups", 8, description="One arm push-ups"),
-                Exercise(
-                    "Planche Push-ups", 9, description="Advanced planche position"
-                ),
+                Exercise("Planche Push-ups", 9, description="Advanced planche position"),
             ],
             "squats": [
                 Exercise("Chair Squats", 1, description="Assisted squats with chair"),
@@ -68,17 +73,13 @@ class ExerciseDatabase:
                 Exercise("Bulgarian Split Squats", 5, description="Rear foot elevated"),
                 Exercise("Cossack Squats", 6, description="Side-to-side squats"),
                 Exercise("Single Leg Squats", 7, description="Pistol squats"),
-                Exercise(
-                    "Jump Pistol Squats", 8, description="Explosive pistol squats"
-                ),
+                Exercise("Jump Pistol Squats", 8, description="Explosive pistol squats"),
                 Exercise("Shrimp Squats", 9, description="Advanced single leg squat"),
             ],
             "pullups": [
                 Exercise("Dead Hangs", 1, description="Hanging from bar"),
                 Exercise("Negative Pull-ups", 2, description="Slow descent from top"),
-                Exercise(
-                    "Assisted Pull-ups", 3, description="Band or partner assisted"
-                ),
+                Exercise("Assisted Pull-ups", 3, description="Band or partner assisted"),
                 Exercise("Regular Pull-ups", 4, description="Standard pull-ups"),
                 Exercise("Wide Grip Pull-ups", 5, description="Wide grip variation"),
                 Exercise("Chin-ups", 6, description="Underhand grip"),
@@ -89,13 +90,9 @@ class ExerciseDatabase:
             "core": [
                 Exercise("Crunches", 1, description="Basic abdominal crunches"),
                 Exercise("Plank", 2, description="Hold plank position (seconds)"),
-                Exercise(
-                    "Bicycle Crunches", 3, description="Alternating elbow to knee"
-                ),
+                Exercise("Bicycle Crunches", 3, description="Alternating elbow to knee"),
                 Exercise("Russian Twists", 4, description="Seated twisting motion"),
-                Exercise(
-                    "Mountain Climbers", 5, description="Running in plank position"
-                ),
+                Exercise("Mountain Climbers", 5, description="Running in plank position"),
                 Exercise("Hollow Body Hold", 6, description="Hollow position hold"),
                 Exercise("L-sits", 7, description="Legs at 90 degrees"),
                 Exercise("Dragon Flags", 8, description="Advanced core exercise"),
@@ -123,16 +120,56 @@ class ExerciseDatabase:
                 Exercise("Burpee Box Jumps", 8, description="Burpee with box jump"),
                 Exercise("Devil Press", 9, description="Burpee with dumbbells"),
             ],
+            "stretching_upper": [
+                Exercise("Neck Rolls", 1, description="Gentle neck circular movements"),
+                Exercise("Shoulder Shrugs", 2, description="Lift shoulders up and down"),
+                Exercise("Arm Circles", 3, description="Large arm circular movements"),
+                Exercise("Cross-body Arm Stretch", 4, description="Pull arm across chest"),
+                Exercise("Overhead Tricep Stretch", 5, description="Reach arm behind head"),
+                Exercise("Upper Back Stretch", 6, description="Clasp hands, round back"),
+                Exercise("Chest Doorway Stretch", 7, description="Stretch in doorway"),
+                Exercise("Eagle Arms", 8, description="Wrap arms around torso"),
+                Exercise("Full Shoulder Flow", 9, description="Dynamic shoulder sequence"),
+            ],
+            "stretching_lower": [
+                Exercise("Ankle Circles", 1, description="Rotate ankles in circles"),
+                Exercise("Calf Raises", 2, description="Rise up on toes"),
+                Exercise("Standing Quad Stretch", 3, description="Hold foot behind you"),
+                Exercise("Standing Forward Fold", 4, description="Touch toes while standing"),
+                Exercise("Hip Circles", 5, description="Circular hip movements"),
+                Exercise("Leg Swings", 6, description="Front to back leg swings"),
+                Exercise("Pigeon Pose", 7, description="Hip flexor stretch"),
+                Exercise("Figure-4 Stretch", 8, description="Hip and glute stretch"),
+                Exercise("Dynamic Leg Flow", 9, description="Full leg stretching sequence"),
+            ],
+            "stretching_core": [
+                Exercise("Torso Twists", 1, description="Side to side torso rotation"),
+                Exercise("Side Bends", 2, description="Lean to each side"),
+                Exercise("Cat-Cow Stretch", 3, description="Spinal flexibility stretch"),
+                Exercise("Seated Spinal Twist", 4, description="Twist spine while seated"),
+                Exercise("Cobra Stretch", 5, description="Arch back, open chest"),
+                Exercise("Child's Pose", 6, description="Rest pose, stretch back"),
+                Exercise("Bridge Pose", 7, description="Lift hips, open hip flexors"),
+                Exercise("Full Spinal Roll", 8, description="Roll spine vertebra by vertebra"),
+                Exercise("Dynamic Core Flow", 9, description="Full body stretching sequence"),
+            ],
         }
 
 
-class WorkoutGUI:
-    def __init__(self):
-        self.root = tk.Tk()
-        self.root.title("🏋️ Workout Snacks")
-        self.root.geometry("800x600")
-        self.root.configure(bg="#f0f0f0")
+class WorkoutGUI(BoxLayout):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.orientation = 'vertical'
+        self.spacing = 0
+        self.padding = 0
 
+        # Dark theme colors
+        self.bg_color = (0.12, 0.12, 0.15, 1)  # Dark background
+        self.card_color = (0.18, 0.18, 0.22, 1)  # Card background
+        self.purple_accent = (0.51, 0.31, 0.87, 1)  # Purple accent
+        self.text_primary = (0.95, 0.95, 0.95, 1)  # Light text
+        self.text_secondary = (0.7, 0.7, 0.75, 1)  # Secondary text
+        
         # Data setup
         self.data_dir = Path.home() / ".workout-snacks"
         self.data_dir.mkdir(exist_ok=True)
@@ -143,16 +180,617 @@ class WorkoutGUI:
         self.current_exercises = []
         self.current_exercise_index = 0
         self.current_reps = 0
+        self.current_view = 'dashboard'
+        self.session_reps = []  # Track reps for each exercise in current session
 
         # Timer variables
         self.timer_running = False
         self.timer_seconds = 60
-        self.timer_thread = None
+        self.timer_event = None
 
         self.init_database()
         self.load_data()
         self.create_widgets()
+        self.setup_dark_background()
 
+    def setup_dark_background(self):
+        """Setup dark theme background"""
+        with self.canvas.before:
+            Color(*self.bg_color)
+            self.bg_rect = Rectangle(size=self.size, pos=self.pos)
+        self.bind(size=self.update_bg_rect, pos=self.update_bg_rect)
+        
+    def update_bg_rect(self, instance, value):
+        self.bg_rect.pos = instance.pos
+        self.bg_rect.size = instance.size
+
+    def create_widgets(self):
+        """Create the modern GUI widgets"""
+        # Create main container
+        self.main_container = BoxLayout(orientation='vertical', spacing=0)
+        
+        # Create dashboard view
+        self.create_dashboard()
+        
+        self.add_widget(self.main_container)
+        
+    def create_dashboard(self):
+        """Create the main dashboard with charts and navigation"""
+        dashboard = BoxLayout(orientation='vertical', spacing=dp(20), padding=dp(20))
+        
+        # Header
+        header = BoxLayout(orientation='horizontal', size_hint_y=None, height=dp(80))
+        with header.canvas.before:
+            Color(*self.card_color)
+            header_rect = Rectangle(size=header.size, pos=header.pos)
+        header.bind(size=lambda i, v: setattr(header_rect, 'size', i.size), 
+                   pos=lambda i, v: setattr(header_rect, 'pos', i.pos))
+        
+        title = Label(
+            text='💪 Workout Snacks',
+            font_size=dp(28),
+            bold=True,
+            color=self.text_primary,
+            halign='left',
+            valign='middle'
+        )
+        title.bind(size=title.setter('text_size'))
+        header.add_widget(title)
+        
+        # Time since last workout
+        self.last_workout_label = Label(
+            text=self.get_time_since_last_workout(),
+            font_size=dp(14),
+            color=self.text_secondary,
+            halign='right',
+            valign='middle'
+        )
+        self.last_workout_label.bind(size=self.last_workout_label.setter('text_size'))
+        header.add_widget(self.last_workout_label)
+        
+        dashboard.add_widget(header)
+        
+        # Stats section
+        stats_layout = BoxLayout(orientation='horizontal', spacing=dp(20), size_hint_y=0.6)
+        
+        # Sessions per day stats
+        sessions_container = self.create_chart_container("Recent Activity")
+        sessions_stats = self.create_sessions_stats_widget()
+        sessions_container.add_widget(sessions_stats)
+        stats_layout.add_widget(sessions_container)
+        
+        # Exercises unlocked stats
+        progress_container = self.create_chart_container("Exercise Progress")
+        progress_stats = self.create_progress_stats_widget()
+        progress_container.add_widget(progress_stats)
+        stats_layout.add_widget(progress_container)
+        
+        dashboard.add_widget(stats_layout)
+        
+        # Navigation buttons
+        nav_layout = BoxLayout(orientation='horizontal', spacing=dp(15), size_hint_y=None, height=dp(80))
+        
+        start_btn = self.create_nav_button('Start Workout', self.start_workout_view)
+        charts_btn = self.create_nav_button('View Charts', self.show_charts_view)
+        progress_btn = self.create_nav_button('Progress', self.show_progress_view)
+        
+        nav_layout.add_widget(start_btn)
+        nav_layout.add_widget(charts_btn)
+        nav_layout.add_widget(progress_btn)
+        
+        dashboard.add_widget(nav_layout)
+        
+        self.main_container.add_widget(dashboard)
+        
+        # Schedule timer updates
+        Clock.schedule_interval(self.update_last_workout_timer, 60.0)  # Update every minute
+    
+    def create_chart_container(self, title):
+        """Create a styled container for charts"""
+        container = BoxLayout(orientation='vertical', spacing=dp(10))
+        
+        # Card background
+        with container.canvas.before:
+            Color(*self.card_color)
+            card_rect = Rectangle(size=container.size, pos=container.pos)
+        container.bind(size=lambda i, v: setattr(card_rect, 'size', i.size),
+                      pos=lambda i, v: setattr(card_rect, 'pos', i.pos))
+        
+        # Title
+        title_label = Label(
+            text=title,
+            font_size=dp(16),
+            bold=True,
+            color=self.text_primary,
+            size_hint_y=None,
+            height=dp(40)
+        )
+        container.add_widget(title_label)
+        
+        return container
+    
+    def create_nav_button(self, text, callback):
+        """Create a styled navigation button"""
+        btn = Button(
+            text=text,
+            font_size=dp(16),
+            bold=True,
+            background_color=self.purple_accent,
+            color=self.text_primary
+        )
+        btn.bind(on_press=lambda x: callback())
+        return btn
+    
+    def get_time_since_last_workout(self):
+        """Get formatted time since last workout"""  
+        if not self.workout_history:
+            return "No workouts yet"
+        
+        last_workout = max(session.timestamp for session in self.workout_history)
+        time_diff = datetime.now() - last_workout
+        
+        if time_diff.days > 0:
+            return f"Last workout: {time_diff.days} day{'s' if time_diff.days > 1 else ''} ago"
+        elif time_diff.seconds > 3600:
+            hours = time_diff.seconds // 3600
+            return f"Last workout: {hours} hour{'s' if hours > 1 else ''} ago"
+        else:
+            minutes = time_diff.seconds // 60
+            return f"Last workout: {minutes} minute{'s' if minutes > 1 else ''} ago"
+    
+    def update_last_workout_timer(self, dt):
+        """Update the last workout timer"""
+        if hasattr(self, 'last_workout_label'):
+            self.last_workout_label.text = self.get_time_since_last_workout()
+    
+    def create_workouts_per_day_chart(self):
+        """Create workouts per day bar chart"""
+        if not MATPLOTLIB_AVAILABLE:
+            return Label(text="Matplotlib not available")
+            
+        plt.style.use('dark_background')
+        fig, ax = plt.subplots(figsize=(6, 4), facecolor='#2e2e37')
+        ax.set_facecolor('#2e2e37')
+        
+        # Get last 14 days
+        today = datetime.now().date()
+        dates = [(today - timedelta(days=i)) for i in range(13, -1, -1)]
+        
+        # Count workouts per day
+        workout_dates = [session.timestamp.date() for session in self.workout_history]
+        date_counts = Counter(workout_dates)
+        counts = [date_counts.get(date, 0) for date in dates]
+        
+        # Create bar chart
+        bars = ax.bar(range(len(dates)), counts, color=self.purple_accent[:3], alpha=0.8)
+        
+        # Style the chart
+        ax.set_xlabel('Date', color='white', fontsize=10)
+        ax.set_ylabel('Workouts', color='white', fontsize=10)
+        ax.set_xticks(range(0, len(dates), 2))  # Show every other date
+        ax.set_xticklabels([dates[i].strftime('%m/%d') for i in range(0, len(dates), 2)], 
+                          rotation=45, color='white', fontsize=8)
+        ax.tick_params(colors='white')
+        ax.spines['bottom'].set_color('white')
+        ax.spines['left'].set_color('white')
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+        
+        # Add value labels on bars
+        for bar, count in zip(bars, counts):
+            if count > 0:
+                ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.05,
+                       str(count), ha='center', va='bottom', color='white', fontsize=8)
+        
+        plt.tight_layout()
+        return FigureCanvasKivyAgg(fig)
+    
+    def create_sessions_stats_widget(self):
+        """Create sessions per day statistics widget"""
+        stats_layout = BoxLayout(orientation='vertical', spacing=dp(10), padding=dp(10))
+        
+        # Get last 7 days data
+        today = datetime.now().date()
+        dates = [(today - timedelta(days=i)) for i in range(6, -1, -1)]
+        workout_dates = [session.timestamp.date() for session in self.workout_history]
+        date_counts = Counter(workout_dates)
+        
+        # Sessions per day for last 7 days
+        sessions_text = "Last 7 Days:\n"
+        total_sessions = 0
+        for date in dates:
+            count = date_counts.get(date, 0)
+            total_sessions += count
+            sessions_text += f"{date.strftime('%m/%d')}: {count} sessions\n"
+        
+        # Calculate average
+        avg_sessions = total_sessions / 7
+        sessions_text += f"\nAverage: {avg_sessions:.1f} sessions/day"
+        
+        sessions_label = Label(
+            text=sessions_text,
+            font_size=dp(12),
+            color=self.text_primary,
+            halign='left',
+            valign='top'
+        )
+        sessions_label.bind(size=sessions_label.setter('text_size'))
+        stats_layout.add_widget(sessions_label)
+        
+        return stats_layout
+    
+    def create_progress_stats_widget(self):
+        """Create exercises unlocked statistics widget"""
+        stats_layout = BoxLayout(orientation='vertical', spacing=dp(10), padding=dp(10))
+        
+        # Count unlocked exercises
+        total_exercises = sum(len(exercises) for exercises in self.exercise_db.exercises.values())
+        unlocked_exercises = 0
+        
+        for exercises in self.exercise_db.exercises.values():
+            for exercise in exercises:
+                if exercise.max_reps_achieved > 0:
+                    unlocked_exercises += 1
+        
+        # Create progress text
+        progress_text = f"Exercises Unlocked:\n\n{unlocked_exercises}/{total_exercises}\n\n"
+        progress_percentage = (unlocked_exercises / total_exercises) * 100 if total_exercises > 0 else 0
+        progress_text += f"{progress_percentage:.1f}% Complete"
+        
+        progress_label = Label(
+            text=progress_text,
+            font_size=dp(16),
+            color=self.purple_accent,
+            halign='center',
+            valign='middle',
+            bold=True
+        )
+        progress_label.bind(size=progress_label.setter('text_size'))
+        stats_layout.add_widget(progress_label)
+        
+        return stats_layout
+
+    # Navigation methods
+    def start_workout_view(self):
+        """Switch to workout view"""
+        self.main_container.clear_widgets()
+        self.create_workout_interface()
+        
+    def show_charts_view(self):
+        """Show detailed charts in popup"""
+        self.show_charts(None)
+        
+    def show_progress_view(self):
+        """Show progress in popup"""
+        self.show_progress_popup()
+
+    def create_workout_interface(self):
+        """Create the workout interface"""
+        workout_layout = BoxLayout(orientation='vertical', spacing=dp(20), padding=dp(20))
+        
+        # Back button
+        back_btn = Button(
+            text='← Back to Dashboard',
+            font_size=dp(14),
+            background_color=self.card_color,
+            color=self.text_primary,
+            size_hint_y=None,
+            height=dp(50)
+        )
+        back_btn.bind(on_press=lambda x: self.return_to_dashboard())
+        workout_layout.add_widget(back_btn)
+        
+        # Exercise info section with dark theme
+        exercise_info_layout = BoxLayout(
+            orientation='vertical', 
+            spacing=dp(5),
+            size_hint_y=None,
+            height=dp(120)
+        )
+        with exercise_info_layout.canvas.before:
+            Color(*self.card_color)
+            exercise_info_rect = Rectangle(size=exercise_info_layout.size, pos=exercise_info_layout.pos)
+        exercise_info_layout.bind(size=lambda i, v: setattr(exercise_info_rect, 'size', i.size),
+                                 pos=lambda i, v: setattr(exercise_info_rect, 'pos', i.pos))
+
+        self.exercise_name_label = Label(
+            text="Click 'Start Workout' to begin",
+            font_size=dp(18),
+            bold=True,
+            color=self.text_primary
+        )
+        exercise_info_layout.add_widget(self.exercise_name_label)
+
+        self.exercise_desc_label = Label(
+            text="",
+            font_size=dp(12),
+            color=self.text_secondary,
+            text_size=(dp(400), None),
+            halign='center'
+        )
+        exercise_info_layout.add_widget(self.exercise_desc_label)
+
+        self.personal_best_label = Label(
+            text="",
+            font_size=dp(10),
+            italic=True,
+            color=self.text_secondary
+        )
+        exercise_info_layout.add_widget(self.personal_best_label)
+        
+        workout_layout.add_widget(exercise_info_layout)
+
+        # Timer section with dark theme
+        timer_layout = BoxLayout(
+            orientation='vertical',
+            spacing=dp(5),
+            size_hint_y=None,
+            height=dp(180)
+        )
+        with timer_layout.canvas.before:
+            Color(*self.purple_accent)
+            timer_rect = Rectangle(size=timer_layout.size, pos=timer_layout.pos)
+        timer_layout.bind(size=lambda i, v: setattr(timer_rect, 'size', i.size),
+                         pos=lambda i, v: setattr(timer_rect, 'pos', i.pos))
+
+        timer_title = Label(
+            text="Timer",
+            font_size=dp(14),
+            bold=True,
+            color=self.text_primary,
+            size_hint_y=None,
+            height=dp(30)
+        )
+        timer_layout.add_widget(timer_title)
+
+        self.timer_display = Label(
+            text="1:00",
+            font_size=dp(36),
+            bold=True,
+            color=self.text_primary,
+            size_hint_y=None,
+            height=dp(60)
+        )
+        timer_layout.add_widget(self.timer_display)
+
+        # Timer control buttons
+        timer_controls = BoxLayout(
+            orientation='horizontal',
+            spacing=dp(5),
+            size_hint_y=None,
+            height=dp(50)
+        )
+
+        self.start_timer_btn = Button(
+            text="Start Timer",
+            font_size=dp(12),
+            background_color=(0.15, 0.68, 0.38, 1),  # Green
+            color=self.text_primary
+        )
+        self.start_timer_btn.bind(on_press=self.start_timer)
+        timer_controls.add_widget(self.start_timer_btn)
+
+        self.stop_timer_btn = Button(
+            text="Stop Timer",
+            font_size=dp(12),
+            background_color=(0.91, 0.30, 0.24, 1),  # Red
+            color=self.text_primary,
+            disabled=True
+        )
+        self.stop_timer_btn.bind(on_press=self.stop_timer)
+        timer_controls.add_widget(self.stop_timer_btn)
+
+        self.reset_timer_btn = Button(
+            text="Reset Timer",
+            font_size=dp(12),
+            background_color=(0.95, 0.61, 0.07, 1),  # Orange
+            color=self.text_primary
+        )
+        self.reset_timer_btn.bind(on_press=self.reset_timer)
+        timer_controls.add_widget(self.reset_timer_btn)
+        
+        timer_layout.add_widget(timer_controls)
+        workout_layout.add_widget(timer_layout)
+
+        # Reps counter section
+        reps_layout = BoxLayout(
+            orientation='vertical',
+            spacing=dp(5),
+            size_hint_y=None,
+            height=dp(140)
+        )
+        with reps_layout.canvas.before:
+            Color(*self.card_color)
+            reps_rect = Rectangle(size=reps_layout.size, pos=reps_layout.pos)
+        reps_layout.bind(size=lambda i, v: setattr(reps_rect, 'size', i.size),
+                        pos=lambda i, v: setattr(reps_rect, 'pos', i.pos))
+
+        reps_title = Label(
+            text="Reps Counter",
+            font_size=dp(14),
+            bold=True,
+            color=self.text_primary,
+            size_hint_y=None,
+            height=dp(30)
+        )
+        reps_layout.add_widget(reps_title)
+
+        self.reps_display = Label(
+            text="0",
+            font_size=dp(24),
+            bold=True,
+            color=self.purple_accent,
+            size_hint_y=None,
+            height=dp(40)
+        )
+        reps_layout.add_widget(self.reps_display)
+
+        reps_controls = BoxLayout(
+            orientation='horizontal',
+            spacing=dp(10),
+            size_hint_y=None,
+            height=dp(50)
+        )
+
+        # -10 button
+        self.reps_minus10_btn = Button(
+            text="-10",
+            font_size=dp(12),
+            bold=True,
+            background_color=(0.91, 0.30, 0.24, 1),  # Red
+            color=self.text_primary,
+            size_hint_x=None,
+            width=dp(60)
+        )
+        self.reps_minus10_btn.bind(on_press=lambda x: self.change_reps(-10))
+        reps_controls.add_widget(self.reps_minus10_btn)
+        
+        # -1 button
+        self.reps_minus1_btn = Button(
+            text="-1",
+            font_size=dp(12),
+            bold=True,
+            background_color=(0.91, 0.30, 0.24, 1),  # Red
+            color=self.text_primary,
+            size_hint_x=None,
+            width=dp(50)
+        )
+        self.reps_minus1_btn.bind(on_press=lambda x: self.change_reps(-1))
+        reps_controls.add_widget(self.reps_minus1_btn)
+        
+        # Add spacer
+        reps_controls.add_widget(Widget())
+        
+        # +1 button
+        self.reps_plus1_btn = Button(
+            text="+1",
+            font_size=dp(12),
+            bold=True,
+            background_color=(0.15, 0.68, 0.38, 1),  # Green
+            color=self.text_primary,
+            size_hint_x=None,
+            width=dp(50)
+        )
+        self.reps_plus1_btn.bind(on_press=lambda x: self.change_reps(1))
+        reps_controls.add_widget(self.reps_plus1_btn)
+        
+        # +10 button
+        self.reps_plus10_btn = Button(
+            text="+10",
+            font_size=dp(12),
+            bold=True,
+            background_color=(0.15, 0.68, 0.38, 1),  # Green
+            color=self.text_primary,
+            size_hint_x=None,
+            width=dp(60)
+        )
+        self.reps_plus10_btn.bind(on_press=lambda x: self.change_reps(10))
+        reps_controls.add_widget(self.reps_plus10_btn)
+        
+        reps_layout.add_widget(reps_controls)
+        workout_layout.add_widget(reps_layout)
+
+        # Control buttons
+        control_layout = BoxLayout(
+            orientation='horizontal',
+            spacing=dp(10),
+            size_hint_y=None,
+            height=dp(60)
+        )
+
+        self.start_workout_btn = Button(
+            text="Start Workout",
+            font_size=dp(14),
+            bold=True,
+            background_color=self.purple_accent,
+            color=self.text_primary
+        )
+        self.start_workout_btn.bind(on_press=self.start_workout)
+        control_layout.add_widget(self.start_workout_btn)
+
+        self.next_exercise_btn = Button(
+            text="Next Exercise",
+            font_size=dp(14),
+            bold=True,
+            background_color=(0.95, 0.61, 0.07, 1),  # Orange
+            color=self.text_primary,
+            disabled=True
+        )
+        self.next_exercise_btn.bind(on_press=self.next_exercise)
+        control_layout.add_widget(self.next_exercise_btn)
+
+        
+        workout_layout.add_widget(control_layout)
+        self.main_container.add_widget(workout_layout)
+        
+    def return_to_dashboard(self):
+        """Return to the main dashboard"""
+        self.main_container.clear_widgets()
+        self.create_dashboard()
+
+    def show_progress_popup(self):
+        """Show progress in a popup"""
+        progress_text = self.generate_progress_text()
+        
+        content = BoxLayout(orientation='vertical', spacing=dp(10), padding=dp(20))
+        
+        scroll = ScrollView()
+        progress_label = Label(
+            text=progress_text,
+            font_name='DejaVuSansMono',
+            font_size=dp(12),
+            color=self.text_primary,
+            text_size=(dp(600), None),
+            halign='left',
+            valign='top',
+            size_hint_y=None
+        )
+        progress_label.bind(texture_size=lambda instance, size: setattr(instance, 'height', size[1]))
+        scroll.add_widget(progress_label)
+        content.add_widget(scroll)
+        
+        close_btn = Button(
+            text='Close',
+            size_hint_y=None,
+            height=dp(50),
+            background_color=self.purple_accent,
+            color=self.text_primary
+        )
+        content.add_widget(close_btn)
+        
+        popup = Popup(
+            title='Workout Progress',
+            content=content,
+            size_hint=(0.9, 0.9),
+            background_color=self.bg_color
+        )
+        close_btn.bind(on_press=popup.dismiss)
+        popup.open()
+
+    def generate_progress_text(self):
+        """Generate progress display text"""
+        progress_text = "=" * 60 + "\n"
+        progress_text += "📊 WORKOUT PROGRESS 📊\n"
+        progress_text += "=" * 60 + "\n\n"
+
+        progress_text += "Current Exercise Levels:\n"
+        for category, exercises in self.exercise_db.exercises.items():
+            progress_text += f"\n{category.upper()}:\n"
+            for exercise in exercises:
+                status = "✓" if exercise.max_reps_achieved > 0 else "○"
+                progress_text += f"  {status} {exercise.name}: {exercise.max_reps_achieved} reps (Level {exercise.difficulty_level})\n"
+
+        # Show recent workouts
+        progress_text += f"\nRecent Workouts ({len(self.workout_history)} total):\n"
+        for session in self.workout_history[-5:]:  # Show last 5
+            progress_text += f"  {session.timestamp.strftime('%Y-%m-%d %H:%M')}:\n"
+            for exercise_name, reps in session.exercises:
+                progress_text += f"    - {exercise_name}: {reps} reps\n"
+
+        progress_text += "\n" + "=" * 60
+        return progress_text
+
+    # Database methods (keeping original implementation)
     def init_database(self):
         """Initialize SQLite database"""
         conn = sqlite3.connect(self.db_file)
@@ -313,10 +951,10 @@ class WorkoutGUI:
         """Get 3 exercises for current workout based on progression"""
         import random
 
-        # Get one exercise from 3 different categories
-        available_categories = list(self.exercise_db.exercises.keys())
+        # Get 3 exercises from different categories (excluding all stretching categories)
+        exercise_categories = [cat for cat in self.exercise_db.exercises.keys() if not cat.startswith('stretching')]
         selected_categories = random.sample(
-            available_categories, min(3, len(available_categories))
+            exercise_categories, min(3, len(exercise_categories))
         )
 
         workout_exercises = []
@@ -343,307 +981,58 @@ class WorkoutGUI:
                     if next_level_exercises:
                         current_exercise = next_level_exercises[0]
                     else:
-                        current_exercise = exercise  # Stay at current level
+                        current_exercise = exercise  # Stay at current level (maxed exercises still appear)
                 else:
                     current_exercise = exercise
                     break
 
             workout_exercises.append(current_exercise)
 
+        # Add 2 stretching exercises from different categories
+        stretching_categories = ['stretching_upper', 'stretching_lower', 'stretching_core']
+        selected_stretch_categories = random.sample(stretching_categories, min(2, len(stretching_categories)))
+        
+        for stretch_category in selected_stretch_categories:
+            stretching_exercises = self.exercise_db.exercises.get(stretch_category, [])
+            if stretching_exercises:
+                # Select appropriate difficulty level for stretching
+                available_stretches = []
+                for stretch in stretching_exercises:
+                    if stretch.max_reps_achieved > 0 or stretch.difficulty_level <= 4:  # Include easy stretches for beginners
+                        available_stretches.append(stretch)
+                
+                if not available_stretches:
+                    available_stretches = stretching_exercises[:4]  # Default to first 4 if none unlocked
+                
+                selected_stretch = random.choice(available_stretches)
+                workout_exercises.append(selected_stretch)
+
         return workout_exercises
 
-    def create_widgets(self):
-        """Create the GUI widgets"""
-        # Main title
-        title_frame = tk.Frame(self.root, bg="#f0f0f0")
-        title_frame.pack(pady=20)
-
-        title_label = tk.Label(
-            title_frame,
-            text="🏋️ Workout Snacks",
-            font=("Arial", 24, "bold"),
-            bg="#f0f0f0",
-            fg="#2c3e50",
-        )
-        title_label.pack()
-
-        # Create notebook for tabs
-        self.notebook = ttk.Notebook(self.root)
-        self.notebook.pack(fill="both", expand=True, padx=20, pady=10)
-
-        # Workout tab
-        self.workout_frame = tk.Frame(self.notebook, bg="#f0f0f0")
-        self.notebook.add(self.workout_frame, text="Workout")
-        self.create_workout_tab()
-
-        # Progress tab
-        self.progress_frame = tk.Frame(self.notebook, bg="#f0f0f0")
-        self.notebook.add(self.progress_frame, text="Progress")
-        self.create_progress_tab()
-
-        # Charts tab
-        self.charts_frame = tk.Frame(self.notebook, bg="#f0f0f0")
-        self.notebook.add(self.charts_frame, text="Charts")
-        self.create_charts_tab()
-
-    def create_workout_tab(self):
-        """Create the workout tab interface"""
-        # Exercise info frame
-        self.exercise_info_frame = tk.Frame(
-            self.workout_frame, bg="#ecf0f1", relief="raised", bd=2
-        )
-        self.exercise_info_frame.pack(fill="x", padx=20, pady=10)
-
-        self.exercise_name_label = tk.Label(
-            self.exercise_info_frame,
-            text="Click 'Start Workout' to begin",
-            font=("Arial", 18, "bold"),
-            bg="#ecf0f1",
-        )
-        self.exercise_name_label.pack(pady=10)
-
-        self.exercise_desc_label = tk.Label(
-            self.exercise_info_frame,
-            text="",
-            font=("Arial", 12),
-            bg="#ecf0f1",
-            wraplength=400,
-        )
-        self.exercise_desc_label.pack(pady=5)
-
-        self.personal_best_label = tk.Label(
-            self.exercise_info_frame,
-            text="",
-            font=("Arial", 10, "italic"),
-            bg="#ecf0f1",
-            fg="#7f8c8d",
-        )
-        self.personal_best_label.pack(pady=5)
-
-        # Timer frame
-        self.timer_frame = tk.Frame(
-            self.workout_frame, bg="#3498db", relief="raised", bd=3
-        )
-        self.timer_frame.pack(fill="x", padx=20, pady=10)
-
-        timer_title = tk.Label(
-            self.timer_frame,
-            text="Timer",
-            font=("Arial", 14, "bold"),
-            bg="#3498db",
-            fg="white",
-        )
-        timer_title.pack(pady=5)
-
-        self.timer_display = tk.Label(
-            self.timer_frame,
-            text="1:00",
-            font=("Arial", 36, "bold"),
-            bg="#3498db",
-            fg="white",
-        )
-        self.timer_display.pack(pady=10)
-
-        # Timer control buttons
-        timer_controls = tk.Frame(self.timer_frame, bg="#3498db")
-        timer_controls.pack(pady=10)
-
-        self.start_timer_btn = tk.Button(
-            timer_controls,
-            text="Start Timer",
-            font=("Arial", 12),
-            bg="#27ae60",
-            fg="white",
-            command=self.start_timer,
-            width=12,
-        )
-        self.start_timer_btn.pack(side="left", padx=5)
-
-        self.stop_timer_btn = tk.Button(
-            timer_controls,
-            text="Stop Timer",
-            font=("Arial", 12),
-            bg="#e74c3c",
-            fg="white",
-            command=self.stop_timer,
-            width=12,
-            state="disabled",
-        )
-        self.stop_timer_btn.pack(side="left", padx=5)
-
-        self.reset_timer_btn = tk.Button(
-            timer_controls,
-            text="Reset Timer",
-            font=("Arial", 12),
-            bg="#f39c12",
-            fg="white",
-            command=self.reset_timer,
-            width=12,
-        )
-        self.reset_timer_btn.pack(side="left", padx=5)
-
-        # Reps counter frame
-        self.reps_frame = tk.Frame(
-            self.workout_frame, bg="#e8f5e8", relief="raised", bd=2
-        )
-        self.reps_frame.pack(fill="x", padx=20, pady=10)
-
-        reps_title = tk.Label(
-            self.reps_frame,
-            text="Reps Counter",
-            font=("Arial", 14, "bold"),
-            bg="#e8f5e8",
-        )
-        reps_title.pack(pady=5)
-
-        self.reps_display = tk.Label(
-            self.reps_frame,
-            text="0",
-            font=("Arial", 24, "bold"),
-            bg="#e8f5e8",
-            fg="#27ae60",
-        )
-        self.reps_display.pack(pady=5)
-
-        reps_controls = tk.Frame(self.reps_frame, bg="#e8f5e8")
-        reps_controls.pack(pady=10)
-
-        self.reps_minus_btn = tk.Button(
-            reps_controls,
-            text="-",
-            font=("Arial", 16, "bold"),
-            bg="#e74c3c",
-            fg="white",
-            command=self.decrease_reps,
-            width=3,
-        )
-        self.reps_minus_btn.pack(side="left", padx=5)
-
-        self.reps_plus_btn = tk.Button(
-            reps_controls,
-            text="+",
-            font=("Arial", 16, "bold"),
-            bg="#27ae60",
-            fg="white",
-            command=self.increase_reps,
-            width=3,
-        )
-        self.reps_plus_btn.pack(side="left", padx=5)
-
-        # Control buttons frame
-        self.control_frame = tk.Frame(self.workout_frame, bg="#f0f0f0")
-        self.control_frame.pack(fill="x", padx=20, pady=20)
-
-        self.start_workout_btn = tk.Button(
-            self.control_frame,
-            text="Start Workout",
-            font=("Arial", 14, "bold"),
-            bg="#3498db",
-            fg="white",
-            command=self.start_workout,
-            height=2,
-            width=15,
-        )
-        self.start_workout_btn.pack(side="left", padx=10)
-
-        self.next_exercise_btn = tk.Button(
-            self.control_frame,
-            text="Next Exercise",
-            font=("Arial", 14, "bold"),
-            bg="#f39c12",
-            fg="white",
-            command=self.next_exercise,
-            height=2,
-            width=15,
-            state="disabled",
-        )
-        self.next_exercise_btn.pack(side="left", padx=10)
-
-        self.finish_workout_btn = tk.Button(
-            self.control_frame,
-            text="Finish Workout",
-            font=("Arial", 14, "bold"),
-            bg="#27ae60",
-            fg="white",
-            command=self.finish_workout,
-            height=2,
-            width=15,
-            state="disabled",
-        )
-        self.finish_workout_btn.pack(side="left", padx=10)
-
-    def create_progress_tab(self):
-        """Create the progress tab interface"""
-        # Progress display area
-        self.progress_text = tk.Text(
-            self.progress_frame, font=("Courier", 10), wrap="word", state="disabled"
-        )
-
-        progress_scrollbar = tk.Scrollbar(self.progress_frame)
-        progress_scrollbar.pack(side="right", fill="y")
-
-        self.progress_text.pack(fill="both", expand=True, padx=20, pady=20)
-        self.progress_text.config(yscrollcommand=progress_scrollbar.set)
-        progress_scrollbar.config(command=self.progress_text.yview)
-
-        # Refresh button
-        refresh_btn = tk.Button(
-            self.progress_frame,
-            text="Refresh Progress",
-            font=("Arial", 12),
-            bg="#3498db",
-            fg="white",
-            command=self.refresh_progress,
-        )
-        refresh_btn.pack(pady=10)
-
-        # Load initial progress
-        self.refresh_progress()
-
-    def create_charts_tab(self):
-        """Create the charts tab interface"""
-        self.charts_label = tk.Label(
-            self.charts_frame,
-            text="Charts will be displayed here",
-            font=("Arial", 14),
-            bg="#f0f0f0",
-        )
-        self.charts_label.pack(expand=True)
-
-        show_charts_btn = tk.Button(
-            self.charts_frame,
-            text="Show Charts",
-            font=("Arial", 12),
-            bg="#3498db",
-            fg="white",
-            command=self.show_charts,
-        )
-        show_charts_btn.pack(pady=20)
-
-    def start_workout(self):
+    # Workout control methods
+    def start_workout(self, instance):
         """Start a new workout session"""
         self.current_exercises = self.get_current_exercises()
         self.current_exercise_index = 0
         self.current_reps = 0
+        self.session_reps = []  # Reset session tracking
 
         if not self.current_exercises:
-            messagebox.showerror("Error", "No exercises available!")
+            self.show_popup("Error", "No exercises available!")
             return
 
-        # Update UI
+        # Update UI to show first exercise immediately
         self.update_exercise_display()
         self.reset_timer()
-        self.reps_display.config(text="0")
+        self.reps_display.text = "0"
 
         # Enable/disable buttons
-        self.start_workout_btn.config(state="disabled")
-        self.next_exercise_btn.config(state="normal")
-        self.finish_workout_btn.config(state="normal")
+        self.start_workout_btn.disabled = True
+        self.next_exercise_btn.disabled = False
+        
+        # Auto-start timer for first exercise
+        self.start_timer(None)
 
-        messagebox.showinfo(
-            "Workout Started",
-            "Workout session started! Complete each exercise for 1 minute.",
-        )
 
     def update_exercise_display(self):
         """Update the exercise information display"""
@@ -653,151 +1042,226 @@ class WorkoutGUI:
             return
 
         exercise = self.current_exercises[self.current_exercise_index]
-        self.exercise_name_label.config(
-            text=f"Exercise {self.current_exercise_index + 1}/3: {exercise.name}"
-        )
-        self.exercise_desc_label.config(text=exercise.description)
-        self.personal_best_label.config(
-            text=f"Personal Best: {exercise.max_reps_achieved} reps"
-        )
+        total_exercises = len(self.current_exercises)
+        exercise_type = "Stretch" if self.current_exercise_index >= 3 else "Exercise"
+        self.exercise_name_label.text = f"{exercise_type} {self.current_exercise_index + 1}/{total_exercises}: {exercise.name}"
+        self.exercise_desc_label.text = exercise.description
+        self.personal_best_label.text = f"Personal Best: {exercise.max_reps_achieved} reps"
 
-    def next_exercise(self):
+    def next_exercise(self, instance):
         """Move to the next exercise"""
         if not self.current_exercises:
             return
 
-        # Save current reps for this exercise
+        # Save current exercise reps before moving to next
+        current_reps = int(self.reps_display.text)
+        self.session_reps.append(current_reps)
+        
+        # Update personal best if needed
         if self.current_exercise_index < len(self.current_exercises):
             exercise = self.current_exercises[self.current_exercise_index]
-            # We'll store reps when finishing the workout
+            if current_reps > exercise.max_reps_achieved:
+                exercise.max_reps_achieved = current_reps
 
         self.current_exercise_index += 1
         self.current_reps = 0
-        self.reps_display.config(text="0")
+        self.reps_display.text = "0"
         self.reset_timer()
 
         if self.current_exercise_index < len(self.current_exercises):
             self.update_exercise_display()
-            messagebox.showinfo(
-                "Next Exercise",
-                f"Moving to exercise {self.current_exercise_index + 1}/3",
-            )
+            # Auto-start timer for next exercise
+            self.start_timer(None)
         else:
-            messagebox.showinfo(
-                "Workout Complete",
-                "All exercises completed! Click 'Finish Workout' to save.",
-            )
-            self.next_exercise_btn.config(state="disabled")
+            # Auto-finish workout when all exercises are done
+            self.finish_workout(None)
+            return
 
-    def finish_workout(self):
+    def finish_workout(self, instance):
         """Finish the current workout session"""
         if not self.current_exercises:
             return
 
-        # Collect reps for all exercises (simplified - using current reps display)
+        # Save the last exercise reps if we're finishing mid-workout
+        if self.current_exercise_index < len(self.current_exercises):
+            current_reps = int(self.reps_display.text)
+            self.session_reps.append(current_reps)
+            
+            # Update personal best for last exercise
+            exercise = self.current_exercises[self.current_exercise_index]
+            if current_reps > exercise.max_reps_achieved:
+                exercise.max_reps_achieved = current_reps
+
+        # Create completed exercises list for saving
         completed_exercises = []
         for i, exercise in enumerate(self.current_exercises):
-            if i == self.current_exercise_index:
-                # Current exercise - use displayed reps
-                reps = int(self.reps_display.cget("text"))
-            else:
-                # Previous exercises - would need to track separately in real implementation
-                # For now, use 0 or ask user
-                reps = 0
-
-            completed_exercises.append((exercise.name, reps))
-
-            # Update personal best
-            if reps > exercise.max_reps_achieved:
-                exercise.max_reps_achieved = reps
+            if i < len(self.session_reps):
+                reps = self.session_reps[i]
+                completed_exercises.append((exercise.name, reps))
 
         # Save workout session
-        session = WorkoutSession(
-            timestamp=datetime.now(), exercises=completed_exercises
-        )
-        self.workout_history.append(session)
-        self.save_workout_session(session)
-        self.save_data()
+        if completed_exercises:
+            session = WorkoutSession(
+                timestamp=datetime.now(), exercises=completed_exercises
+            )
+            self.workout_history.append(session)
+            self.save_workout_session(session)
+            self.save_data()
+        
+        # Show progress comparison modal
+        self.show_progress_comparison_modal()
 
         # Reset UI
-        self.exercise_name_label.config(text="Workout Completed! 💪")
-        self.exercise_desc_label.config(text="Great job! Your progress has been saved.")
-        self.personal_best_label.config(text="")
+        self.exercise_name_label.text = "Workout Completed! 💪"
+        self.exercise_desc_label.text = "Great job! Your progress has been saved."
+        self.personal_best_label.text = ""
 
-        self.start_workout_btn.config(state="normal")
-        self.next_exercise_btn.config(state="disabled")
-        self.finish_workout_btn.config(state="disabled")
+        self.start_workout_btn.disabled = False
+        self.next_exercise_btn.disabled = True
 
         self.stop_timer()
         self.reset_timer()
 
-        messagebox.showinfo("Workout Saved", "Workout completed and saved! 💪")
+        # Reset workout state (modal will handle returning to dashboard)
+        
+    def show_progress_comparison_modal(self):
+        """Show progress comparison modal at end of workout"""
+        if not self.current_exercises or not self.session_reps:
+            self.return_to_dashboard()
+            return
+            
+        comparison_text = "🏆 WORKOUT COMPLETE! 🏆\n" + "=" * 50 + "\n\n"
+        comparison_text += "Exercise Progress Comparison:\n\n"
+        
+        improvements = 0
+        for i, exercise in enumerate(self.current_exercises):
+            if i < len(self.session_reps):
+                session_reps = self.session_reps[i]
+                previous_best = exercise.max_reps_achieved - session_reps if session_reps > (exercise.max_reps_achieved - session_reps) else exercise.max_reps_achieved
+                
+                # Determine if this was an improvement
+                if session_reps > previous_best:
+                    improvements += 1
+                    status = "🔥 NEW PERSONAL BEST!"
+                elif session_reps == exercise.max_reps_achieved:
+                    status = "✅ Matched Personal Best"
+                else:
+                    status = "📈 Keep practicing"
+                
+                comparison_text += f"{exercise.name}:\n"
+                comparison_text += f"  Today: {session_reps} reps\n"
+                comparison_text += f"  Best: {exercise.max_reps_achieved} reps\n"
+                comparison_text += f"  {status}\n\n"
+        
+        if improvements > 0:
+            comparison_text += f"🎉 You improved on {improvements} exercise{'s' if improvements > 1 else ''}!\n"
+        else:
+            comparison_text += "💪 Great workout! Keep pushing for new personal bests!\n"
+        
+        comparison_text += "\n" + "=" * 50
+        
+        # Create popup
+        content = BoxLayout(orientation='vertical', spacing=dp(10), padding=dp(20))
+        
+        scroll = ScrollView()
+        progress_label = Label(
+            text=comparison_text,
+            font_name='DejaVuSansMono',
+            font_size=dp(12),
+            color=self.text_primary,
+            text_size=(dp(600), None),
+            halign='left',
+            valign='top',
+            size_hint_y=None
+        )
+        progress_label.bind(texture_size=lambda instance, size: setattr(instance, 'height', size[1]))
+        scroll.add_widget(progress_label)
+        content.add_widget(scroll)
+        
+        close_btn = Button(
+            text='Continue',
+            size_hint_y=None,
+            height=dp(50),
+            background_color=self.purple_accent,
+            color=self.text_primary
+        )
+        content.add_widget(close_btn)
+        
+        popup = Popup(
+            title='Workout Results',
+            content=content,
+            size_hint=(0.9, 0.8),
+            background_color=self.bg_color
+        )
+        close_btn.bind(on_press=lambda x: self.close_progress_modal(popup))
+        popup.open()
+        
+    def close_progress_modal(self, popup):
+        """Close progress modal and return to dashboard"""
+        popup.dismiss()
+        self.return_to_dashboard()
 
-        # Refresh progress display
-        self.refresh_progress()
-
-    def start_timer(self):
+    # Timer methods
+    def start_timer(self, instance):
         """Start the countdown timer"""
         if not self.timer_running:
             self.timer_running = True
-            self.start_timer_btn.config(state="disabled")
-            self.stop_timer_btn.config(state="normal")
+            self.start_timer_btn.disabled = True
+            self.stop_timer_btn.disabled = False
+            
+            # Use Kivy's Clock.schedule_interval
+            self.timer_event = Clock.schedule_interval(self.run_timer_tick, 1.0)
 
-            self.timer_thread = threading.Thread(target=self.run_timer)
-            self.timer_thread.daemon = True
-            self.timer_thread.start()
-
-    def stop_timer(self):
+    def stop_timer(self, instance=None):
         """Stop the countdown timer"""
         self.timer_running = False
-        self.start_timer_btn.config(state="normal")
-        self.stop_timer_btn.config(state="disabled")
+        self.start_timer_btn.disabled = False
+        self.stop_timer_btn.disabled = True
+        if self.timer_event:
+            self.timer_event.cancel()
+            self.timer_event = None
 
-    def reset_timer(self):
+    def reset_timer(self, instance=None):
         """Reset the timer to 1 minute"""
         self.stop_timer()
         self.timer_seconds = 60
-        self.timer_display.config(text="1:00", fg="white", bg="#3498db")
+        self.timer_display.text = "1:00"
+        self.timer_display.color = self.text_primary
 
-    def run_timer(self):
-        """Run the countdown timer in a separate thread"""
-        while self.timer_running and self.timer_seconds > 0:
-            minutes = self.timer_seconds // 60
-            seconds = self.timer_seconds % 60
-            time_str = f"{minutes}:{seconds:02d}"
+    def run_timer_tick(self, dt):
+        """Run one timer tick using Kivy's Clock"""
+        if not self.timer_running or self.timer_seconds <= 0:
+            if self.timer_seconds <= 0:
+                self.timer_display.text = "0:00"
+                self.timer_display.color = self.text_primary
+                self.timer_finished()
+            self.timer_running = False
+            if self.timer_event:
+                self.timer_event.cancel()
+                self.timer_event = None
+            return False  # Stop the clock
+            
+        # Update display
+        minutes = self.timer_seconds // 60
+        seconds = self.timer_seconds % 60
+        time_str = f"{minutes}:{seconds:02d}"
+        self.timer_display.text = time_str
 
-            # Update display on main thread
-            self.root.after(0, lambda: self.timer_display.config(text=time_str))
+        # Change color when time is running low
+        if self.timer_seconds <= 10:
+            self.timer_display.color = (1, 0.3, 0.3, 1)  # Red
+        elif self.timer_seconds <= 30:
+            self.timer_display.color = (1, 0.8, 0.3, 1)  # Orange
+        else:
+            self.timer_display.color = self.text_primary  # White
 
-            # Change color when time is running low
-            if self.timer_seconds <= 10:
-                self.root.after(
-                    0, lambda: self.timer_display.config(fg="white", bg="#e74c3c")
-                )
-            elif self.timer_seconds <= 30:
-                self.root.after(
-                    0, lambda: self.timer_display.config(fg="white", bg="#f39c12")
-                )
-
-            time.sleep(1)
-            self.timer_seconds -= 1
-
-        # Timer finished
-        if self.timer_seconds <= 0:
-            self.root.after(
-                0,
-                lambda: self.timer_display.config(
-                    text="0:00", fg="white", bg="#e74c3c"
-                ),
-            )
-            self.root.after(0, self.timer_finished)
-
-        self.timer_running = False
+        self.timer_seconds -= 1
+        return True  # Continue the clock
 
     def timer_finished(self):
         """Handle timer completion"""
-        self.start_timer_btn.config(state="normal")
-        self.stop_timer_btn.config(state="disabled")
+        self.start_timer_btn.disabled = False
+        self.stop_timer_btn.disabled = True
 
         # Play notification sound and show message
         try:
@@ -807,151 +1271,172 @@ class WorkoutGUI:
                 timeout=5,
                 app_name="Workout Snacks",
             )
-        except:
+        except Exception:
             pass
 
-        messagebox.showinfo("Time's Up!", "1 minute completed! Great job! 💪")
 
-    def increase_reps(self):
-        """Increase reps counter"""
-        current = int(self.reps_display.cget("text"))
-        self.reps_display.config(text=str(current + 1))
+    def change_reps(self, change):
+        """Change reps by the specified amount"""
+        try:
+            current = int(self.reps_display.text)
+        except ValueError:
+            current = 0
+        
+        new_value = max(0, min(999, current + change))  # Keep between 0 and 999
+        self.reps_display.text = str(new_value)
+        if hasattr(self, 'reps_input'):
+            self.reps_input.text = "0"
 
-    def decrease_reps(self):
-        """Decrease reps counter"""
-        current = int(self.reps_display.cget("text"))
-        if current > 0:
-            self.reps_display.config(text=str(current - 1))
 
-    def refresh_progress(self):
-        """Refresh the progress display"""
-        self.progress_text.config(state="normal")
-        self.progress_text.delete(1.0, tk.END)
-
-        # Show current exercise levels
-        progress_text = "=" * 60 + "\n"
-        progress_text += "📊 WORKOUT PROGRESS 📊\n"
-        progress_text += "=" * 60 + "\n\n"
-
-        progress_text += "Current Exercise Levels:\n"
-        for category, exercises in self.exercise_db.exercises.items():
-            progress_text += f"\n{category.upper()}:\n"
-            for exercise in exercises:
-                status = "✓" if exercise.max_reps_achieved > 0 else "○"
-                progress_text += f"  {status} {exercise.name}: {exercise.max_reps_achieved} reps (Level {exercise.difficulty_level})\n"
-
-        # Show recent workouts
-        progress_text += f"\nRecent Workouts ({len(self.workout_history)} total):\n"
-        for session in self.workout_history[-5:]:  # Show last 5
-            progress_text += f"  {session.timestamp.strftime('%Y-%m-%d %H:%M')}:\n"
-            for exercise_name, reps in session.exercises:
-                progress_text += f"    - {exercise_name}: {reps} reps\n"
-
-        progress_text += "\n" + "=" * 60
-
-        self.progress_text.insert(tk.END, progress_text)
-        self.progress_text.config(state="disabled")
-
-    def show_charts(self):
-        """Show workout charts in a separate window"""
+    def show_charts(self, instance):
+        """Show workout statistics in a popup"""
         if not self.workout_history:
-            messagebox.showinfo("No Data", "No workout data available for charts.")
+            self.show_popup("No Data", "No workout data available for charts.")
             return
 
-        # Create charts in a separate matplotlib window
-        fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(15, 12))
-        fig.suptitle("Workout Analytics", fontsize=16, fontweight="bold")
+        # Generate statistics text
+        stats_content = self.generate_stats_text()
+        
+        # Create popup with statistics
+        content = BoxLayout(orientation='vertical', spacing=dp(10), padding=dp(20))
+        
+        scroll = ScrollView()
+        stats_label = Label(
+            text=stats_content,
+            font_name='DejaVuSansMono',
+            font_size=dp(12),
+            color=self.text_primary,
+            text_size=(dp(600), None),
+            halign='left',
+            valign='top',
+            size_hint_y=None
+        )
+        stats_label.bind(texture_size=lambda instance, size: setattr(instance, 'height', size[1]))
+        scroll.add_widget(stats_label)
+        content.add_widget(scroll)
+        
+        close_btn = Button(
+            text='Close',
+            size_hint_y=None,
+            height=dp(50),
+            background_color=self.purple_accent,
+            color=self.text_primary
+        )
+        content.add_widget(close_btn)
+        
+        popup = Popup(
+            title='Workout Statistics',
+            content=content,
+            size_hint=(0.9, 0.9),
+            background_color=self.bg_color
+        )
+        close_btn.bind(on_press=popup.dismiss)
+        popup.open()
+        
+    def show_popup(self, title, message):
+        """Show a simple popup message"""
+        content = BoxLayout(orientation='vertical', spacing=dp(10), padding=dp(20))
+        
+        message_label = Label(
+            text=message,
+            text_size=(dp(300), None),
+            halign='center',
+            valign='middle',
+            color=self.text_primary
+        )
+        content.add_widget(message_label)
+        
+        ok_btn = Button(
+            text='OK',
+            size_hint_y=None,
+            height=dp(50),
+            background_color=self.purple_accent,
+            color=self.text_primary
+        )
+        content.add_widget(ok_btn)
+        
+        popup = Popup(
+            title=title,
+            content=content,
+            size_hint=(None, None),
+            size=(dp(350), dp(200)),
+            background_color=self.bg_color
+        )
+        ok_btn.bind(on_press=popup.dismiss)
+        popup.open()
 
-        # Prepare data
+    def generate_stats_text(self):
+        """Generate comprehensive workout statistics as text"""
+        if not self.workout_history:
+            return "No workout data available."
+
+        stats = "=" * 80 + "\n"
+        stats += "📊 WORKOUT STATISTICS 📊\n"
+        stats += "=" * 80 + "\n\n"
+
+        # Basic stats
+        total_workouts = len(self.workout_history)
+        stats += f"Total Workouts: {total_workouts}\n"
+        
+        if self.workout_history:
+            first_workout = min(session.timestamp for session in self.workout_history)
+            last_workout = max(session.timestamp for session in self.workout_history)
+            stats += f"First Workout: {first_workout.strftime('%Y-%m-%d %H:%M')}\n"
+            stats += f"Last Workout: {last_workout.strftime('%Y-%m-%d %H:%M')}\n\n"
+
+        # Workouts per day
         dates = [session.timestamp.date() for session in self.workout_history]
         date_counts = Counter(dates)
+        stats += "Workouts per Day:\n"
+        for date in sorted(date_counts.keys(), reverse=True)[:10]:
+            stats += f"  {date}: {date_counts[date]} workout(s)\n"
+        stats += "\n"
 
-        # Chart 1: Workouts per day
-        sorted_dates = sorted(date_counts.keys())
-        workout_counts = [date_counts[date] for date in sorted_dates]
-
-        ax1.bar(sorted_dates, workout_counts, color="skyblue", alpha=0.7)
-        ax1.set_title("Workouts per Day")
-        ax1.set_xlabel("Date")
-        ax1.set_ylabel("Number of Workouts")
-        ax1.tick_params(axis="x", rotation=45)
-
-        # Chart 2: Reps per minute trend
-        exercise_reps = defaultdict(list)
-        exercise_dates = defaultdict(list)
-
-        for session in self.workout_history:
-            for exercise_name, reps in session.exercises:
-                exercise_reps[exercise_name].append(reps)
-                exercise_dates[exercise_name].append(session.timestamp.date())
-
-        # Plot top 3 exercises by frequency
-        top_exercises = sorted(
-            exercise_reps.keys(), key=lambda x: len(exercise_reps[x]), reverse=True
-        )[:3]
-        colors = ["red", "green", "blue"]
-
-        for i, exercise in enumerate(top_exercises):
-            if i < len(colors):
-                ax2.plot(
-                    exercise_dates[exercise],
-                    exercise_reps[exercise],
-                    marker="o",
-                    label=exercise,
-                    color=colors[i],
-                    alpha=0.7,
-                )
-
-        ax2.set_title("Reps per Minute Trend (Top 3 Exercises)")
-        ax2.set_xlabel("Date")
-        ax2.set_ylabel("Reps per Minute")
-        ax2.legend()
-        ax2.tick_params(axis="x", rotation=45)
-
-        # Chart 3: Exercise distribution
+        # Exercise frequency
         all_exercises = [
             exercise_name
             for session in self.workout_history
             for exercise_name, _ in session.exercises
         ]
         exercise_counts = Counter(all_exercises)
+        stats += "Most Frequent Exercises:\n"
+        for exercise, count in exercise_counts.most_common(10):
+            stats += f"  {exercise}: {count} times\n"
+        stats += "\n"
 
-        top_exercises_pie = dict(Counter(all_exercises).most_common(6))
-        if top_exercises_pie:
-            ax3.pie(
-                top_exercises_pie.values(),
-                labels=top_exercises_pie.keys(),
-                autopct="%1.1f%%",
-            )
-        ax3.set_title("Exercise Distribution")
-
-        # Chart 4: Personal best progression
-        pb_data = {}
-        for category, exercises in self.exercise_db.exercises.items():
+        # Personal bests
+        stats += "Personal Bests:\n"
+        pb_data = []
+        for exercises in self.exercise_db.exercises.values():
             for exercise in exercises:
                 if exercise.max_reps_achieved > 0:
-                    pb_data[f"{exercise.name}"] = exercise.max_reps_achieved
+                    pb_data.append((exercise.name, exercise.max_reps_achieved))
+        
+        pb_data.sort(key=lambda x: x[1], reverse=True)
+        for name, reps in pb_data[:15]:
+            stats += f"  {name}: {reps} reps\n"
+        
+        stats += "\n" + "=" * 80
+        return stats
 
-        if pb_data:
-            sorted_pb = sorted(pb_data.items(), key=lambda x: x[1], reverse=True)[:8]
-            names, values = zip(*sorted_pb)
+    def on_stop(self):
+        """Handle application stopping"""
+        self.timer_running = False
+        if self.timer_event:
+            self.timer_event.cancel()
 
-            ax4.barh(names, values, color="lightgreen", alpha=0.7)
-            ax4.set_title("Personal Bests")
-            ax4.set_xlabel("Max Reps Achieved")
 
-        plt.tight_layout()
-        plt.show()
-
-    def run(self):
-        """Run the GUI application"""
-        self.root.mainloop()
+class WorkoutSnacksApp(App):
+    def build(self):
+        return WorkoutGUI()
+    
+    def get_application_name(self):
+        return "Workout Snacks"
 
 
 def main():
     """Main entry point"""
-    app = WorkoutGUI()
-    app.run()
+    WorkoutSnacksApp().run()
 
 
 if __name__ == "__main__":
