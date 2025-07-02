@@ -4,23 +4,13 @@ Workout Snacks CLI - Command line version without system tray
 """
 
 import argparse
+import random
 import sqlite3
-import time
+from collections import Counter
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
-from typing import List, Tuple
-
-try:
-    from collections import Counter, defaultdict
-
-    import matplotlib.pyplot as plt
-    from apscheduler.schedulers.background import BackgroundScheduler
-    from plyer import notification
-except ImportError as e:
-    print(f"Missing dependency: {e}")
-    print("Run: uv pip install plyer apscheduler matplotlib")
-    exit(1)
+from typing import Dict, List, Tuple
 
 
 @dataclass
@@ -29,95 +19,13 @@ class Exercise:
     difficulty_level: int
     max_reps_achieved: int = 0
     description: str = ""
+    category: str = ""
 
 
 @dataclass
 class WorkoutSession:
     timestamp: datetime
     exercises: List[Tuple[str, int]]  # (exercise_name, reps_completed)
-    duration_minutes: int = 3
-
-
-class ExerciseDatabase:
-    def __init__(self):
-        self.exercises = {
-            "pushups": [
-                Exercise("Knee Push-ups", 1, description="Push-ups on knees"),
-                Exercise("Regular Push-ups", 2, description="Standard push-ups"),
-                Exercise("Wide Push-ups", 3, description="Hands wider than shoulders"),
-                Exercise("Diamond Push-ups", 4, description="Hands in diamond shape"),
-                Exercise("Decline Push-ups", 5, description="Feet elevated"),
-                Exercise("Pike Push-ups", 6, description="Inverted V position"),
-                Exercise("Archer Push-ups", 7, description="One-sided push-ups"),
-                Exercise("Single Arm Push-ups", 8, description="One arm push-ups"),
-                Exercise(
-                    "Planche Push-ups", 9, description="Advanced planche position"
-                ),
-            ],
-            "squats": [
-                Exercise("Chair Squats", 1, description="Assisted squats with chair"),
-                Exercise("Air Squats", 2, description="Bodyweight squats"),
-                Exercise("Sumo Squats", 3, description="Wide stance squats"),
-                Exercise("Jump Squats", 4, description="Explosive squat jumps"),
-                Exercise("Bulgarian Split Squats", 5, description="Rear foot elevated"),
-                Exercise("Cossack Squats", 6, description="Side-to-side squats"),
-                Exercise("Single Leg Squats", 7, description="Pistol squats"),
-                Exercise(
-                    "Jump Pistol Squats", 8, description="Explosive pistol squats"
-                ),
-                Exercise("Shrimp Squats", 9, description="Advanced single leg squat"),
-            ],
-            "pullups": [
-                Exercise("Dead Hangs", 1, description="Hanging from bar"),
-                Exercise("Negative Pull-ups", 2, description="Slow descent from top"),
-                Exercise(
-                    "Assisted Pull-ups", 3, description="Band or partner assisted"
-                ),
-                Exercise("Regular Pull-ups", 4, description="Standard pull-ups"),
-                Exercise("Wide Grip Pull-ups", 5, description="Wide grip variation"),
-                Exercise("Chin-ups", 6, description="Underhand grip"),
-                Exercise("Commando Pull-ups", 7, description="Side-to-side pull-ups"),
-                Exercise("Weighted Pull-ups", 8, description="Add weight"),
-                Exercise("Muscle-ups", 9, description="Pull-up to dip transition"),
-            ],
-            "core": [
-                Exercise("Crunches", 1, description="Basic abdominal crunches"),
-                Exercise("Plank", 2, description="Hold plank position (seconds)"),
-                Exercise(
-                    "Bicycle Crunches", 3, description="Alternating elbow to knee"
-                ),
-                Exercise("Russian Twists", 4, description="Seated twisting motion"),
-                Exercise(
-                    "Mountain Climbers", 5, description="Running in plank position"
-                ),
-                Exercise("Hollow Body Hold", 6, description="Hollow position hold"),
-                Exercise("L-sits", 7, description="Legs at 90 degrees"),
-                Exercise("Dragon Flags", 8, description="Advanced core exercise"),
-                Exercise("Human Flag", 9, description="Side plank on pole"),
-            ],
-            "dips": [
-                Exercise("Assisted Dips", 1, description="Band or partner assisted"),
-                Exercise("Bench Dips", 2, description="Feet on ground"),
-                Exercise("Elevated Bench Dips", 3, description="Feet elevated"),
-                Exercise("Parallel Bar Dips", 4, description="Standard dips"),
-                Exercise("Ring Dips", 5, description="On gymnastic rings"),
-                Exercise("Weighted Dips", 6, description="Add weight"),
-                Exercise("Archer Dips", 7, description="One-sided dips"),
-                Exercise("Single Bar Dips", 8, description="On single bar"),
-                Exercise("Impossible Dips", 9, description="Advanced ring dips"),
-            ],
-            "cardio": [
-                Exercise("Jumping Jacks", 1, description="Basic jumping jacks"),
-                Exercise("High Knees", 2, description="Running in place"),
-                Exercise("Burpees", 3, description="Full body exercise"),
-                Exercise("Mountain Climbers", 4, description="Fast mountain climbers"),
-                Exercise("Star Jumps", 5, description="Explosive star position"),
-                Exercise("Tuck Jumps", 6, description="Knees to chest jumps"),
-                Exercise("Squat Jumps", 7, description="Continuous squat jumps"),
-                Exercise("Burpee Box Jumps", 8, description="Burpee with box jump"),
-                Exercise("Devil Press", 9, description="Burpee with dumbbells"),
-            ],
-        }
 
 
 class WorkoutApp:
@@ -126,10 +34,8 @@ class WorkoutApp:
         self.data_dir.mkdir(exist_ok=True)
         self.db_file = self.data_dir / "workout_data.db"
 
-        self.exercise_db = ExerciseDatabase()
+        self.exercises: Dict[str, List[Exercise]] = {}
         self.workout_history: List[WorkoutSession] = []
-        self.scheduler = BackgroundScheduler()
-        self.next_workout_time = None
 
         self.init_database()
         self.load_data()
@@ -139,7 +45,7 @@ class WorkoutApp:
         conn = sqlite3.connect(self.db_file)
         cursor = conn.cursor()
 
-        # Create exercises table
+        # Create exercises table with equipment field
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS exercises (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -148,6 +54,7 @@ class WorkoutApp:
                 difficulty_level INTEGER NOT NULL,
                 max_reps_achieved INTEGER DEFAULT 0,
                 description TEXT,
+                equipment_required TEXT,
                 UNIQUE(category, name)
             )
         """)
@@ -175,47 +82,44 @@ class WorkoutApp:
         conn.commit()
         conn.close()
 
-        # Populate initial exercise data
-        self.populate_initial_exercises()
-
-    def populate_initial_exercises(self):
-        """Populate database with initial exercise data"""
-        conn = sqlite3.connect(self.db_file)
-        cursor = conn.cursor()
-
-        for category, exercises in self.exercise_db.exercises.items():
-            for exercise in exercises:
-                cursor.execute(
-                    """
-                    INSERT OR IGNORE INTO exercises 
-                    (category, name, difficulty_level, max_reps_achieved, description) 
-                    VALUES (?, ?, ?, ?, ?)
-                """,
-                    (
-                        category,
-                        exercise.name,
-                        exercise.difficulty_level,
-                        exercise.max_reps_achieved,
-                        exercise.description,
-                    ),
-                )
-
-        conn.commit()
-        conn.close()
-
     def load_data(self):
         """Load workout history and exercise progress from database"""
         conn = sqlite3.connect(self.db_file)
         cursor = conn.cursor()
 
-        # Load exercise progress
-        cursor.execute("SELECT category, name, max_reps_achieved FROM exercises")
-        for category, name, max_reps in cursor.fetchall():
-            if category in self.exercise_db.exercises:
-                for exercise in self.exercise_db.exercises[category]:
-                    if exercise.name == name:
-                        exercise.max_reps_achieved = max_reps
-                        break
+        # Load exercises from database
+        try:
+            cursor.execute("""
+                SELECT category, name, difficulty_level, max_reps_achieved, description 
+                FROM exercises 
+                ORDER BY category, difficulty_level
+            """)
+
+            for (
+                category,
+                name,
+                difficulty_level,
+                max_reps,
+                description,
+            ) in cursor.fetchall():
+                if category not in self.exercises:
+                    self.exercises[category] = []
+
+                exercise = Exercise(
+                    name=name,
+                    difficulty_level=difficulty_level,
+                    max_reps_achieved=max_reps,
+                    description=description or "",
+                    category=category,
+                )
+                self.exercises[category].append(exercise)
+
+        except sqlite3.OperationalError:
+            print("No exercises found in database.")
+            print(
+                "Please run 'python populate_exercises.py' to set up your exercise database."
+            )
+            return
 
         # Load workout history
         cursor.execute("""
@@ -235,7 +139,6 @@ class WorkoutApp:
             session = WorkoutSession(
                 timestamp=datetime.fromisoformat(timestamp),
                 exercises=data["exercises"],
-                duration_minutes=data["duration"],
             )
             self.workout_history.append(session)
 
@@ -247,7 +150,7 @@ class WorkoutApp:
         cursor = conn.cursor()
 
         # Update exercise progress
-        for category, exercises in self.exercise_db.exercises.items():
+        for category, exercises in self.exercises.items():
             for exercise in exercises:
                 cursor.execute(
                     """
@@ -272,7 +175,7 @@ class WorkoutApp:
             INSERT INTO workout_sessions (timestamp, duration_minutes) 
             VALUES (?, ?)
         """,
-            (session.timestamp.isoformat(), session.duration_minutes),
+            (session.timestamp.isoformat(), 3),
         )
 
         session_id = cursor.lastrowid
@@ -291,19 +194,21 @@ class WorkoutApp:
         conn.close()
 
     def get_current_exercises(self) -> List[Exercise]:
-        """Get 3 exercises for current workout based on progression"""
-        import random
+        """Get 4 exercises for current workout based on progression"""
+        if not self.exercises:
+            print("No exercises available. Run 'python populate_exercises.py' first.")
+            return []
 
-        # Get one exercise from 3 different categories
-        available_categories = list(self.exercise_db.exercises.keys())
+        # Get one exercise from 4 different categories
+        available_categories = list(self.exercises.keys())
         selected_categories = random.sample(
-            available_categories, min(3, len(available_categories))
+            available_categories, min(4, len(available_categories))
         )
 
         workout_exercises = []
 
         for category in selected_categories:
-            exercises = self.exercise_db.exercises[category]
+            exercises = self.exercises[category]
             current_exercise = exercises[0]  # Start with easiest
 
             # Find the appropriate difficulty level based on progression
@@ -312,9 +217,7 @@ class WorkoutApp:
                     # Never done this exercise, start here
                     current_exercise = exercise
                     break
-                elif (
-                    exercise.max_reps_achieved >= 15
-                ):  # Lower threshold for progression
+                if exercise.max_reps_achieved >= 15:  # Progression threshold
                     # Look for next level
                     next_level_exercises = [
                         e
@@ -333,30 +236,104 @@ class WorkoutApp:
 
         return workout_exercises
 
+    def get_exercise_progression_info(self, exercise: Exercise, category: str) -> tuple:
+        """Get current and previous level exercise info for display"""
+        exercises_in_category = self.exercises[category]
+        previous_exercise = None
+
+        # Find previous level exercise
+        for ex in exercises_in_category:
+            if ex.difficulty_level == exercise.difficulty_level - 1:
+                previous_exercise = ex
+                break
+
+        return exercise, previous_exercise
+
+    def get_last_workout_time(self) -> str:
+        """Get timestamp of last workout session"""
+        if not self.workout_history:
+            return "No previous workouts found"
+
+        last_workout = max(self.workout_history, key=lambda x: x.timestamp)
+        return last_workout.timestamp.strftime("%Y-%m-%d %H:%M:%S")
+
+    def get_current_level_for_category(self, category: str) -> Exercise:
+        """Get the current level exercise for a category"""
+        if category not in self.exercises:
+            return None
+
+        exercises = self.exercises[category]
+
+        # Find the highest level with reps achieved
+        current_exercise = exercises[0]  # Default to first
+
+        for exercise in exercises:
+            if exercise.max_reps_achieved > 0:
+                current_exercise = exercise
+            else:
+                break  # First exercise with no reps is current level
+
+        return current_exercise
+
+    def get_last_5_days_workout_count(self) -> dict:
+        """Get workout count for last 5 days"""
+        today = datetime.now().date()
+        last_5_days = [(today - timedelta(days=i)) for i in range(5)]
+
+        # Count workouts per day
+        workout_dates = [session.timestamp.date() for session in self.workout_history]
+        date_counts = Counter(workout_dates)
+
+        daily_counts = {}
+        for day in last_5_days:
+            daily_counts[day] = date_counts.get(day, 0)
+
+        return daily_counts
+
     def start_workout(self):
         """Start a workout session"""
         exercises = self.get_current_exercises()
 
-        print("\n" + "=" * 50)
+        if not exercises:
+            return
+
+        print("\n" + "=" * 60)
         print("🏋️  WORKOUT TIME! 🏋️")
-        print("=" * 50)
-        print("Complete each exercise for 1 minute:")
+        print("=" * 60)
+        print(f"Last workout: {self.get_last_workout_time()}")
+        print("\nToday's 4 exercises (do as many reps as you can with good form):")
+        print()
+
+        # Display all 4 exercises upfront
+        for i, exercise in enumerate(exercises, 1):
+            category = exercise.category
+            if category:
+                _, previous_ex = self.get_exercise_progression_info(exercise, category)
+            else:
+                previous_ex = None
+
+            print(f"{i}. {exercise.name} (Level {exercise.difficulty_level})")
+            print(f"   Description: {exercise.description}")
+            print(f"   Personal Best: {exercise.max_reps_achieved} reps")
+            if previous_ex:
+                print(
+                    f"   Previous Level: {previous_ex.name} (Level {previous_ex.difficulty_level})"
+                )
+            print()
+
+        print("📸 Take a photo if needed, then do your workout!")
+        print("\nWhen ready, enter your completed reps for each exercise:")
         print()
 
         completed_exercises = []
 
         for i, exercise in enumerate(exercises, 1):
-            print(f"{i}. {exercise.name}")
-            print(f"   Description: {exercise.description}")
-            print(f"   Personal Best: {exercise.max_reps_achieved} reps")
-            print()
+            print(f"{i}. {exercise.name}:")
 
             # Get user input for reps completed
             while True:
                 try:
-                    reps = int(
-                        input(f"   How many {exercise.name.lower()} did you complete? ")
-                    )
+                    reps = int(input("   How many reps did you complete? "))
                     if reps >= 0:
                         break
                     print("   Please enter a non-negative number.")
@@ -369,6 +346,8 @@ class WorkoutApp:
             if reps > exercise.max_reps_achieved:
                 exercise.max_reps_achieved = reps
                 print(f"   🎉 New personal best! ({reps} reps)")
+            elif reps >= 15 and exercise.difficulty_level < 20:  # Check for progression
+                print("   💪 Great job! You're ready to progress to the next level!")
 
             print()
 
@@ -381,225 +360,59 @@ class WorkoutApp:
         self.save_data()
 
         print("Great job! Workout completed. 💪")
-        print("=" * 50)
+        print("=" * 60)
 
     def show_progress(self):
-        """Display workout progress"""
+        """Display simplified workout progress"""
+        if not self.exercises:
+            print(
+                "No exercises found. Run 'python populate_exercises.py' to set up your exercise database."
+            )
+            return
+
         print("\n" + "=" * 50)
         print("📊 WORKOUT PROGRESS 📊")
         print("=" * 50)
 
-        # Show current exercise levels
-        print("Current Exercise Levels:")
-        for category, exercises in self.exercise_db.exercises.items():
-            print(f"\n{category.upper()}:")
-            for exercise in exercises:
-                status = "✓" if exercise.max_reps_achieved > 0 else "○"
+        # Show current level for each exercise lane
+        print("Current Level in Each Exercise Lane:")
+        print()
+
+        for category, exercises in self.exercises.items():
+            current_exercise = self.get_current_level_for_category(category)
+            if current_exercise:
+                max_level = max(ex.difficulty_level for ex in exercises)
+
+                print(f"{category.upper()}:")
                 print(
-                    f"  {status} {exercise.name}: {exercise.max_reps_achieved} reps (Level {exercise.difficulty_level})"
+                    f"  Current: {current_exercise.name} (Level {current_exercise.difficulty_level}/{max_level})"
                 )
+                print(f"  Best: {current_exercise.max_reps_achieved} reps")
+                print()
 
-        # Show recent workouts
-        print(f"\nRecent Workouts ({len(self.workout_history)} total):")
-        for session in self.workout_history[-5:]:  # Show last 5
-            print(f"  {session.timestamp.strftime('%Y-%m-%d %H:%M')}:")
-            for exercise_name, reps in session.exercises:
-                print(f"    - {exercise_name}: {reps} reps")
+        # Show last 5 days workout count
+        print("Workouts in Last 5 Days:")
+        daily_counts = self.get_last_5_days_workout_count()
 
+        for day, count in daily_counts.items():
+            day_name = day.strftime("%a %m-%d")
+            print(f"  {day_name}: {count} workouts")
+
+        total_recent = sum(daily_counts.values())
+        print(f"\nTotal last 5 days: {total_recent} workouts")
+        print(f"Total all time: {len(self.workout_history)} workouts")
         print("=" * 50)
-
-    def show_charts(self):
-        """Display workout visualization charts"""
-        if not self.workout_history:
-            print("No workout data available for charts.")
-            return
-
-        # Create subplots
-        fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(15, 12))
-        fig.suptitle("Workout Analytics", fontsize=16, fontweight="bold")
-
-        # Prepare data
-        dates = [session.timestamp.date() for session in self.workout_history]
-        date_counts = Counter(dates)
-
-        # Chart 1: Workouts per day
-        sorted_dates = sorted(date_counts.keys())
-        workout_counts = [date_counts[date] for date in sorted_dates]
-
-        ax1.bar(sorted_dates, workout_counts, color="skyblue", alpha=0.7)
-        ax1.set_title("Workouts per Day")
-        ax1.set_xlabel("Date")
-        ax1.set_ylabel("Number of Workouts")
-        ax1.tick_params(axis="x", rotation=45)
-
-        # Chart 2: Reps per minute trend
-        exercise_reps = defaultdict(list)
-        exercise_dates = defaultdict(list)
-
-        for session in self.workout_history:
-            for exercise_name, reps in session.exercises:
-                exercise_reps[exercise_name].append(reps)
-                exercise_dates[exercise_name].append(session.timestamp.date())
-
-        # Plot top 3 exercises by frequency
-        top_exercises = sorted(
-            exercise_reps.keys(), key=lambda x: len(exercise_reps[x]), reverse=True
-        )[:3]
-        colors = ["red", "green", "blue"]
-
-        for i, exercise in enumerate(top_exercises):
-            ax2.plot(
-                exercise_dates[exercise],
-                exercise_reps[exercise],
-                marker="o",
-                label=exercise,
-                color=colors[i],
-                alpha=0.7,
-            )
-
-        ax2.set_title("Reps per Minute Trend (Top 3 Exercises)")
-        ax2.set_xlabel("Date")
-        ax2.set_ylabel("Reps per Minute")
-        ax2.legend()
-        ax2.tick_params(axis="x", rotation=45)
-
-        # Chart 3: Exercise distribution
-        all_exercises = [
-            exercise_name
-            for session in self.workout_history
-            for exercise_name, _ in session.exercises
-        ]
-        exercise_counts = Counter(all_exercises)
-
-        top_exercises_pie = dict(Counter(all_exercises).most_common(6))
-        ax3.pie(
-            top_exercises_pie.values(),
-            labels=top_exercises_pie.keys(),
-            autopct="%1.1f%%",
-        )
-        ax3.set_title("Exercise Distribution")
-
-        # Chart 4: Personal best progression
-        pb_data = {}
-        for category, exercises in self.exercise_db.exercises.items():
-            for exercise in exercises:
-                if exercise.max_reps_achieved > 0:
-                    pb_data[f"{exercise.name}"] = exercise.max_reps_achieved
-
-        if pb_data:
-            sorted_pb = sorted(pb_data.items(), key=lambda x: x[1], reverse=True)[:8]
-            names, values = zip(*sorted_pb)
-
-            ax4.barh(names, values, color="lightgreen", alpha=0.7)
-            ax4.set_title("Personal Bests")
-            ax4.set_xlabel("Max Reps Achieved")
-
-        plt.tight_layout()
-        plt.show()
-
-        # Also show summary stats
-        self.show_workout_stats()
-
-    def show_workout_stats(self):
-        """Display detailed workout statistics"""
-        if not self.workout_history:
-            return
-
-        print("\n" + "=" * 50)
-        print("📈 DETAILED WORKOUT STATISTICS 📈")
-        print("=" * 50)
-
-        # Total workouts
-        total_workouts = len(self.workout_history)
-        print(f"Total Workouts: {total_workouts}")
-
-        # Workouts per day average
-        if total_workouts > 0:
-            first_workout = min(
-                session.timestamp.date() for session in self.workout_history
-            )
-            last_workout = max(
-                session.timestamp.date() for session in self.workout_history
-            )
-            days_active = (last_workout - first_workout).days + 1
-            avg_per_day = total_workouts / days_active
-            print(f"Average Workouts per Day: {avg_per_day:.2f}")
-
-            # Most active day
-            dates = [session.timestamp.date() for session in self.workout_history]
-            date_counts = Counter(dates)
-            most_active_date, max_workouts = date_counts.most_common(1)[0]
-            print(f"Most Active Day: {most_active_date} ({max_workouts} workouts)")
-
-            # Exercise statistics
-            all_exercises = [
-                exercise_name
-                for session in self.workout_history
-                for exercise_name, _ in session.exercises
-            ]
-            exercise_counts = Counter(all_exercises)
-            print(
-                f"\nMost Frequent Exercise: {exercise_counts.most_common(1)[0][0]} ({exercise_counts.most_common(1)[0][1]} times)"
-            )
-
-            # Average reps per exercise
-            exercise_reps = defaultdict(list)
-            for session in self.workout_history:
-                for exercise_name, reps in session.exercises:
-                    exercise_reps[exercise_name].append(reps)
-
-            print("\nAverage Reps per Exercise:")
-            for exercise, reps_list in sorted(exercise_reps.items()):
-                avg_reps = sum(reps_list) / len(reps_list)
-                print(f"  {exercise}: {avg_reps:.1f} reps")
-
-        print("=" * 50)
-
-    def send_notification(self, title, message):
-        """Send desktop notification"""
-        try:
-            notification.notify(
-                title=title, message=message, timeout=10, app_name="Workout Snacks"
-            )
-        except Exception as e:
-            print(f"Notification error: {e}")
-
-    def start_daemon(self):
-        """Start background daemon for notifications"""
-        print("🏋️  Workout Snacks Daemon Started! 🏋️")
-        print("Notifications every 90 minutes...")
-        print("Press Ctrl+C to stop daemon")
-
-        self.scheduler.add_job(
-            self.workout_reminder, "interval", minutes=90, id="workout_reminder"
-        )
-
-        self.scheduler.start()
-
-        try:
-            while True:
-                time.sleep(1)
-        except KeyboardInterrupt:
-            print("\nShutting down daemon...")
-            self.scheduler.shutdown()
-
-    def workout_reminder(self):
-        """Send workout reminder notification"""
-        self.send_notification(
-            "Workout Time!",
-            "Time for your exercise snack! Run 'python workout_cli.py workout' to start.",
-        )
-        print(f"[{datetime.now().strftime('%H:%M:%S')}] Workout reminder sent!")
 
 
 def main():
+    """Main function"""
     parser = argparse.ArgumentParser(
         description="Workout Snacks - Calisthenics Tracker"
     )
     parser.add_argument(
         "command",
         nargs="?",
-        choices=["workout", "progress", "charts", "daemon"],
+        choices=["workout", "progress"],
         help="Command to execute",
     )
 
@@ -610,17 +423,11 @@ def main():
         app.start_workout()
     elif args.command == "progress":
         app.show_progress()
-    elif args.command == "charts":
-        app.show_charts()
-    elif args.command == "daemon":
-        app.start_daemon()
     else:
         print("🏋️  Workout Snacks CLI 🏋️")
         print("Usage:")
         print("  python workout_cli.py workout   - Start a workout session")
         print("  python workout_cli.py progress  - View progress and stats")
-        print("  python workout_cli.py charts    - View visualization charts")
-        print("  python workout_cli.py daemon    - Start background notifications")
 
 
 if __name__ == "__main__":
