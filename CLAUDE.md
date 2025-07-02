@@ -4,82 +4,123 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Workout Snacks is a Python-based progressive exercise tracking application that provides timed workout reminders and tracks exercise progression. The goal is to encourage regular micro-workouts (1-5 minutes) throughout the day with progressive difficulty scaling.
+Workout Snacks is a Python-based progressive exercise tracking application that encourages regular micro-workouts with equipment-based exercise progressions. The focus is on form over speed, with a streamlined workflow for mobile/remote workouts.
 
 ## Key Components
 
-- **main.py**: Full-featured GUI application with system tray integration using pystray
-- **workout_cli.py**: Command-line interface version without GUI dependencies
-- **workout_gui.py**: Desktop GUI application with built-in 1-minute timer for PC workouts
-- **ExerciseDatabase**: Manages 6 exercise categories (pushups, squats, pullups, core, dips, cardio) with 9 difficulty levels each
-- **SQLite Database**: Stores workout sessions, exercise progress, and personal bests in ~/.workout-snacks/
-- **Progressive Difficulty**: Automatically increases exercise difficulty when user achieves 15+ reps
+- **workout_cli.py**: Simplified CLI application (database-driven, no hardcoded exercises)
+- **populate_exercises.py**: Equipment-based exercise database setup script
+- **workout.sh**: Shell script runner with virtual environment support
+- **SQLite Database**: Stores exercises, workout sessions, and progress in ~/.workout-snacks/
+
+## Core Philosophy
+
+- **Form over speed**: No timers, focus on proper form and personal limits
+- **Equipment-aware**: Exercises adapt to available equipment (bodyweight, pull-up bar, dumbbells, barbell, treadmill)
+- **Progressive difficulty**: Automatically scales when achieving 15+ reps
+- **Mobile-friendly**: Shows all 4 exercises upfront for photo and remote execution
+- **Database-driven**: All exercises loaded from SQLite, no hardcoded data
 
 ## Development Commands
 
-### Run the Application
+### First-Time Setup
 
 ```bash
-python main.py                    # GUI version with system tray
-python workout_cli.py             # CLI version
-python workout_gui.py             # Desktop GUI with timer
+# Setup personalized exercise database
+python populate_exercises.py
 ```
 
-### Hyprland System Tray
+This interactive script asks about available equipment and populates the database with appropriate exercise progressions.
 
-pystray doesn't work well with Wayland/Hyprland. Use these alternatives:
-
-**Option 1: Waybar Integration (Recommended)**
+### Daily Usage
 
 ```bash
-python workout_waybar.py daemon    # Start waybar-compatible daemon
+# Using shell script (recommended)
+./workout.sh workout        # Start workout session
+./workout.sh progress       # View progress and stats
+
+# Direct python execution
+python workout_cli.py workout     # Start workout
+python workout_cli.py progress    # View progress
 ```
 
-Add the custom module from `waybar-workout-config.json` to your waybar config.
-
-**Option 2: CLI Daemon**
+### Development Dependencies
 
 ```bash
-python workout_cli.py daemon       # Notifications only
-```
-
-### Autostart with Hyprland
-
-Add to your autostart.conf:
-
-```bash
-exec-once = cd /home/joaoant/Documents/workout-snacks && python workout_waybar.py daemon &
-```
-
-### CLI Commands
-
-```bash
-python workout_cli.py workout     # Start workout session
-python workout_cli.py progress    # View progress and stats
-python workout_cli.py charts      # Show visualization charts
-python workout_cli.py daemon      # Background notifications
-```
-
-### Install Dependencies
-
-```bash
-pip install plyer pystray pillow apscheduler matplotlib
-# or
-uv pip install plyer pystray pillow apscheduler matplotlib
-
-# For GUI version, also install tkinter:
-sudo pacman -S tk                 # Arch Linux
-sudo apt install python3-tk      # Ubuntu/Debian
-sudo dnf install tkinter          # Fedora
+# Minimal dependencies (all in Python standard library except collections)
+# No external dependencies required for core functionality
 ```
 
 ## Architecture Notes
 
-- **Workout Logic**: Selects 3 exercises from different categories, each for 1 minute
-- **Progression System**: Tracks max reps achieved per exercise; advances difficulty at 15+ reps
-- **Data Persistence**: SQLite database with tables for exercises, workout_sessions, and workout_exercises
-- **Notifications**: 90-minute intervals with 30-minute warnings (GUI version)
+### Database Schema
+
+- **exercises**: category, name, difficulty_level, max_reps_achieved, description, equipment_required
+- **workout_sessions**: timestamp, duration_minutes
+- **workout_exercises**: session_id, exercise_name, reps_completed
+
+### Exercise Categories
+
+Current categories with varying difficulty levels (1-13):
+- **pushups**: Wall pushups → Planche pushups (9-13 levels depending on equipment)
+- **squats**: Chair squats → Dragon squats (9-12 levels)
+- **pullups**: Dead hangs → One-arm pull-ups (requires pull-up bar, 9-13 levels)
+- **core**: Dead bugs → Human flag (8-12 levels)
+- **dips**: Assisted dips → Impossible dips (requires pull-up bar, 6-10 levels)
+- **cardio**: Marching → Devil press (6-11 levels depending on equipment)
+- **yoga**: Child's pose → Scorpion pose (12 levels, bodyweight only)
+- **stretches**: Neck rolls → Spinal twist (12 levels, bodyweight only)
+
+### Workout Logic
+
+1. **Exercise Selection**: Selects 4 exercises from different categories randomly
+2. **Progression Logic**: 
+   - If max_reps_achieved == 0: Start with current exercise
+   - If max_reps_achieved >= 15: Progress to next difficulty level
+   - Otherwise: Stay at current level
+3. **Display**: Shows current level and previous level for context
+4. **Input**: User enters reps completed (no timer pressure)
+5. **Tracking**: Updates personal bests and progression automatically
+
+## File Structure
+
+```
+workout-snacks/
+├── workout_cli.py           # Main CLI application (cleaned, database-driven)
+├── populate_exercises.py    # Exercise database setup (equipment-based)
+├── workout.sh              # Shell script runner (.venv support)
+├── README.md               # User documentation
+├── CLAUDE.md               # This file (development guidance)
+└── ~/.workout-snacks/
+    └── workout_data.db     # SQLite database (auto-created)
+```
 
 ## User Experience
 
-The app provides both immediate feedback during workouts and long-term progress tracking through charts and statistics. Exercise difficulty automatically progresses based on performance, ensuring continuous challenge without manual adjustment.
+The application provides a streamlined workflow:
+
+1. **Setup**: Run `populate_exercises.py` once to configure exercises based on equipment
+2. **Workout**: Run `./workout.sh workout` to see 4 exercises, take photo if needed, do workout, enter reps
+3. **Progress**: Run `./workout.sh progress` to see current level in each exercise lane and recent activity
+
+### Key Design Decisions
+
+- **No timers**: Removed all timer functionality to focus on form over speed
+- **Equipment-aware**: Database populated based on user's available equipment
+- **Mobile workflow**: All exercises shown upfront for photo capture and remote execution
+- **Simplified progress**: Shows only essential info (current level, recent activity)
+- **Database-first**: Eliminated hardcoded exercise data, everything comes from database
+
+## Important Implementation Notes
+
+- **No hardcoded exercises**: All exercise data comes from database populated by `populate_exercises.py`
+- **Equipment filtering**: Exercises are filtered during database population, not at runtime
+- **Single source of truth**: Database is the only source for exercises, no duplication
+- **Graceful degradation**: Handles missing database with helpful error messages
+- **Clean separation**: Setup (populate_exercises.py) vs. usage (workout_cli.py)
+
+# important-instruction-reminders
+Do what has been asked; nothing more, nothing less.
+NEVER create files unless they're absolutely necessary for achieving your goal.
+ALWAYS prefer editing an existing file to creating a new one.
+NEVER proactively create documentation files (*.md) or README files. Only create documentation files if explicitly requested by the User.
